@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Galaxia del Amor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;width:100%;overflow:hidden;background:#000;touch-action:none;}
+canvas{display:block;touch-action:none;}
+
+.color-picker{
+  position:fixed;
+  bottom:env(safe-area-inset-bottom, 20px);
+  bottom:calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:14px;
+  z-index:1000;
+  background:rgba(0,0,0,0.55);
+  border-radius:999px;
+  padding:12px 24px;
+  border:1px solid rgba(255,255,255,0.2);
+}
+.color-btn{
+  width:40px;
+  height:40px;
+  border-radius:50%;
+  border:3px solid rgba(255,255,255,0.35);
+  cursor:pointer;
+  outline:none;
+  -webkit-appearance:none;
+  appearance:none;
+}
+.color-btn.active{border-color:#fff;}
+.color-btn.btn-naranja{background:radial-gradient(circle at 40% 35%,#ffcc66,#ff6600);}
+.color-btn.btn-rosa{background:radial-gradient(circle at 40% 35%,#ffaaee,#ff0099);}
+.color-btn.btn-azul{background:radial-gradient(circle at 40% 35%,#88ddff,#0055ff);}
+.color-btn.btn-rojo{background:radial-gradient(circle at 40% 35%,#ff8888,#cc0000);}
+
+.tap-hint{
+  position:fixed;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  color:rgba(255,255,255,0.7);
+  font-family:'Georgia',serif;
+  font-size:16px;
+  letter-spacing:3px;
+  text-transform:uppercase;
+  pointer-events:none;
+  z-index:999;
+  text-align:center;
+  transition:opacity 1s;
+}
+.tap-hint span{display:block;font-size:32px;margin-bottom:8px;animation:pulse-hint 1.5s ease-in-out infinite;}
+@keyframes pulse-hint{0%,100%{opacity:0.5;}50%{opacity:1;}}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="tap-hint" id="tapHint">
+  <span>💫</span>
+  Toca aquí, amor
+</div>
+
+<div class="color-picker" id="colorPicker" style="opacity:0;transition:opacity 1s;">
+  <button class="color-btn btn-naranja active" data-color="naranja" title="Naranja"></button>
+  <button class="color-btn btn-rosa" data-color="rosa" title="Rosa"></button>
+  <button class="color-btn btn-azul" data-color="azul" title="Azul"></button>
+  <button class="color-btn btn-rojo" data-color="rojo" title="Rojo"></button>
+</div>
+
+<audio id="audio" loop>
+  <source src="https://www.dropbox.com/scl/fi/qfv28rqu6b36jwusao4x4/Love.MP3?rlkey=ptjd053374f028aa4jfcfrfxn&st=1j0j51eo&raw=1" type="audio/mpeg">
+</audio>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.min.js"></script>
+<script>
+const PALETTES = {
+  naranja:{main:0xff6600,glow0:"rgba(255,160,0,.9)",glow1:"rgba(255,60,0,.5)",ring0:"rgba(255,255,200,1)",ring1:"rgba(255,160,60,.9)",ring2:"rgba(255,80,0,.6)",light:0xff6600,center:"#ff0033",centerShadow:"#ff66aa",wordColors:["#ff66ff","#66ccff","#ffd36b","#ff9966","#8df59a","#ffa0f8","#c6a7ff","#ff4444"]},
+  rosa:{main:0xff00aa,glow0:"rgba(255,100,220,.9)",glow1:"rgba(255,0,150,.5)",ring0:"rgba(255,220,255,1)",ring1:"rgba(255,100,220,.9)",ring2:"rgba(200,0,130,.6)",light:0xff00cc,center:"#ff0099",centerShadow:"#ffaaee",wordColors:["#ff99ee","#ffbbdd","#ffccff","#ff55cc","#ffaaff","#ff77bb","#ff44aa","#ffddee"]},
+  azul:{main:0x0088ff,glow0:"rgba(80,180,255,.9)",glow1:"rgba(0,80,200,.5)",ring0:"rgba(200,230,255,1)",ring1:"rgba(80,160,255,.9)",ring2:"rgba(0,60,180,.6)",light:0x0099ff,center:"#0066ff",centerShadow:"#88ccff",wordColors:["#66aaff","#aaddff","#88eeff","#5599ff","#99ccff","#44aaff","#bbddff","#3377ff"]},
+  rojo:{main:0xcc0000,glow0:"rgba(220,60,60,.9)",glow1:"rgba(160,0,0,.5)",ring0:"rgba(255,200,200,1)",ring1:"rgba(220,80,80,.9)",ring2:"rgba(150,0,0,.6)",light:0xff2200,center:"#cc0000",centerShadow:"#ff6666",wordColors:["#ff6666","#ff9999","#ffbbbb","#ff4444","#ffaaaa","#ff3333","#ff8888","#ff5555"]}
+};
+
+let currentPalette="naranja", started=false;
+const audio=document.getElementById("audio");
+const tapHint=document.getElementById("tapHint");
+const colorPicker=document.getElementById("colorPicker");
+
+// THREE setup
+const canvas=document.getElementById("c");
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+renderer.setSize(innerWidth,innerHeight);
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,5000);
+
+let targetDist=220, currentDist=220, rotX=.2, rotY=0;
+
+const loader=new THREE.TextureLoader();
+scene.background=loader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/space/px.jpg");
+
+(function(count=2000,size=3000){
+  const geo=new THREE.BufferGeometry();
+  const arr=new Float32Array(count*3);
+  for(let i=0;i<count;i++){
+    const r=size*(.3+.7*Math.random()),theta=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    arr[i*3]=r*Math.sin(phi)*Math.cos(theta);
+    arr[i*3+1]=r*Math.cos(phi);
+    arr[i*3+2]=r*Math.sin(phi)*Math.sin(theta);
+  }
+  geo.setAttribute("position",new THREE.BufferAttribute(arr,3));
+  scene.add(new THREE.Points(geo,new THREE.PointsMaterial({size:1.5,color:0xffffff,depthWrite:false})));
+})();
+
+const core=new THREE.Mesh(new THREE.SphereGeometry(40,64,64),new THREE.MeshPhongMaterial({color:0x111111,transparent:true,opacity:.6,shininess:200}));
+scene.add(core);
+scene.add(new THREE.AmbientLight(0xffffff,.8));
+const light=new THREE.PointLight(0xff6600,2);
+light.position.set(100,100,100);
+scene.add(light);
+
+function makeCenterTextTexture(text,color,shadow){
+  const c=document.createElement("canvas"); c.width=512; c.height=512;
+  const ctx=c.getContext("2d");
+  ctx.font="bold 80px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle=color; ctx.shadowColor=shadow; ctx.shadowBlur=50;
+  ctx.fillText(text,256,256);
+  return new THREE.CanvasTexture(c);
+}
+const centerSprite=new THREE.Sprite(new THREE.SpriteMaterial({map:makeCenterTextTexture("TE AMO ❤️","#ff0033","#ff66aa"),transparent:true}));
+centerSprite.scale.set(60,60,1);
+scene.add(centerSprite);
+
+function makeGlow(g0,g1){
+  const c=document.createElement("canvas"); c.width=768; c.height=768;
+  const ctx=c.getContext("2d");
+  const g=ctx.createRadialGradient(384,384,20,384,384,384);
+  g.addColorStop(0,g0); g.addColorStop(.5,g1); g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=g; ctx.fillRect(0,0,768,768);
+  return new THREE.CanvasTexture(c);
+}
+const glowMat=new THREE.SpriteMaterial({map:makeGlow("rgba(255,160,0,.9)","rgba(255,60,0,.5)"),transparent:true,depthWrite:false});
+const glow=new THREE.Sprite(glowMat);
+glow.scale.set(500,500,1);
+scene.add(glow);
+
+function ringTexture(r0,r1,r2){
+  const c=document.createElement("canvas"); c.width=768; c.height=768;
+  const ctx=c.getContext("2d");
+  ctx.translate(384,384);
+  const g=ctx.createRadialGradient(0,0,120,0,0,370);
+  g.addColorStop(0,r0); g.addColorStop(.3,r1); g.addColorStop(.65,r2); g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.arc(0,0,370,0,Math.PI*2); ctx.arc(0,0,260,0,Math.PI*2,true); ctx.closePath(); ctx.fill();
+  return new THREE.CanvasTexture(c);
+}
+const ring1Mat=new THREE.MeshBasicMaterial({map:ringTexture("rgba(255,255,200,1)","rgba(255,160,60,.9)","rgba(255,80,0,.6)"),transparent:true,side:THREE.DoubleSide});
+const ring2Mat=new THREE.MeshBasicMaterial({map:ringTexture("rgba(255,255,200,1)","rgba(255,160,60,.9)","rgba(255,80,0,.6)"),transparent:true,side:THREE.DoubleSide,opacity:.6});
+const ring1=new THREE.Mesh(new THREE.RingGeometry(60,80,128),ring1Mat);
+const ring2=new THREE.Mesh(new THREE.RingGeometry(85,100,128),ring2Mat);
+ring1.rotation.x=Math.PI/2; ring2.rotation.x=Math.PI/2;
+scene.add(ring1); scene.add(ring2);
+
+const WORDS=[];
+const baseWords=["💖 Mi amor","🌞 Mi sol","🌎 Mi mundo","✨ Brillas","❤️ Te amo","🌌 Universo","👑 Reina","🌠 Estrella","💫 Mi cielo","🔥 Siempre tú","🎶 Tu risa","🦋 Libertad","💎 Eres todo","EVANGELINE","💕 Cariño","🌹 Amor eterno","🌸ABRIL","🌟 Contigo","🧸 AMOR MIO","🎁 Mi razón"];
+for(let i=0;i<6;i++) WORDS.push(...baseWords);
+
+function makeTextTexture(text,color){
+  const c=document.createElement("canvas"); c.width=512; c.height=128;
+  const ctx=c.getContext("2d");
+  ctx.font="bold 60px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle="#fff"; ctx.shadowColor=color; ctx.shadowBlur=30;
+  ctx.fillText(text,256,64);
+  return new THREE.CanvasTexture(c);
+}
+
+const textGroup=new THREE.Group();
+scene.add(textGroup);
+const COLORS=["#ff66ff","#66ccff","#ffd36b","#ff9966","#8df59a","#ffa0f8","#c6a7ff","#ff4444"];
+for(let i=0;i<WORDS.length;i++){
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:makeTextTexture(WORDS[i],COLORS[i%COLORS.length]),transparent:true}));
+  sprite.scale.set(50,16,1);
+  const phi=Math.acos(2*Math.random()-1),theta=Math.random()*Math.PI*2,radius=150+120*Math.random();
+  sprite.position.set(radius*Math.sin(phi)*Math.cos(theta),radius*Math.cos(phi),radius*Math.sin(phi)*Math.sin(theta));
+  sprite.userData={phi,theta,radius,speed:.001+.001*Math.random()};
+  textGroup.add(sprite);
+}
+
+function applyPalette(name){
+  const p=PALETTES[name];
+  glowMat.map=makeGlow(p.glow0,p.glow1); glowMat.map.needsUpdate=true;
+  ring1Mat.map=ringTexture(p.ring0,p.ring1,p.ring2); ring1Mat.map.needsUpdate=true;
+  ring2Mat.map=ringTexture(p.ring0,p.ring1,p.ring2); ring2Mat.map.needsUpdate=true;
+  light.color.setHex(p.light);
+  centerSprite.material.map=makeCenterTextTexture("TE AMO ❤️",p.center,p.centerShadow);
+  centerSprite.material.map.needsUpdate=true;
+  textGroup.children.forEach((obj,i)=>{
+    obj.material.map=makeTextTexture(WORDS[i%WORDS.length],p.wordColors[i%p.wordColors.length]);
+    obj.material.map.needsUpdate=true;
+  });
+}
+
+// Color buttons - usar touchend para no interferir con drag
+document.querySelectorAll(".color-btn").forEach(btn=>{
+  // Usar touchend en móvil para botones de color
+  btn.addEventListener("touchend",function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll(".color-btn").forEach(b=>b.classList.remove("active"));
+    this.classList.add("active");
+    currentPalette=this.dataset.color;
+    applyPalette(currentPalette);
+  },{passive:false});
+  btn.addEventListener("click",function(e){
+    e.stopPropagation();
+    document.querySelectorAll(".color-btn").forEach(b=>b.classList.remove("active"));
+    this.classList.add("active");
+    currentPalette=this.dataset.color;
+    applyPalette(currentPalette);
+  });
+});
+
+// ---- INICIO ----
+function startExperience(){
+  if(started) return;
+  started=true;
+  audio.play().catch(()=>{});
+  tapHint.style.opacity="0";
+  setTimeout(()=>tapHint.style.display="none",1000);
+  colorPicker.style.opacity="1";
+}
+
+// ---- CONTROLES DE TOQUE MEJORADOS ----
+let dragging=false;
+let lastX=0, lastY=0;
+// Para pinch-zoom
+let lastPinchDist=0;
+let isPinching=false;
+
+function getTouchDist(touches){
+  const dx=touches[0].clientX-touches[1].clientX;
+  const dy=touches[0].clientY-touches[1].clientY;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+
+canvas.addEventListener("touchstart",function(e){
+  e.preventDefault(); // CRÍTICO: evita scroll del navegador
+  if(!started) startExperience();
+
+  if(e.touches.length===1){
+    isPinching=false;
+    dragging=true;
+    lastX=e.touches[0].clientX;
+    lastY=e.touches[0].clientY;
+  } else if(e.touches.length===2){
+    isPinching=true;
+    dragging=false;
+    lastPinchDist=getTouchDist(e.touches);
+  }
+},{passive:false});
+
+canvas.addEventListener("touchmove",function(e){
+  e.preventDefault(); // CRÍTICO
+  if(e.touches.length===1 && dragging && !isPinching){
+    const dx=(e.touches[0].clientX-lastX)/innerWidth;
+    const dy=(e.touches[0].clientY-lastY)/innerHeight;
+    rotY-=3*dx;
+    rotX=Math.max(-1.2,Math.min(1.2,rotX-2.2*dy));
+    lastX=e.touches[0].clientX;
+    lastY=e.touches[0].clientY;
+  } else if(e.touches.length===2){
+    isPinching=true;
+    dragging=false;
+    const dist=getTouchDist(e.touches);
+    if(lastPinchDist>0){
+      const delta=lastPinchDist-dist;
+      targetDist+=delta*0.8;
+      targetDist=Math.max(80,Math.min(600,targetDist));
+    }
+    lastPinchDist=dist;
+  }
+},{passive:false});
+
+canvas.addEventListener("touchend",function(e){
+  e.preventDefault();
+  if(e.touches.length<2){
+    isPinching=false;
+    lastPinchDist=0;
+  }
+  if(e.touches.length===0){
+    dragging=false;
+  } else if(e.touches.length===1){
+    dragging=true;
+    lastX=e.touches[0].clientX;
+    lastY=e.touches[0].clientY;
+  }
+},{passive:false});
+
+// Mouse (escritorio)
+canvas.addEventListener("mousedown",function(e){
+  if(!started) startExperience();
+  dragging=true; lastX=e.clientX; lastY=e.clientY;
+});
+window.addEventListener("mousemove",function(e){
+  if(!dragging) return;
+  const dx=(e.clientX-lastX)/innerWidth, dy=(e.clientY-lastY)/innerHeight;
+  rotY-=3*dx; rotX=Math.max(-1.2,Math.min(1.2,rotX-2.2*dy));
+  lastX=e.clientX; lastY=e.clientY;
+});
+window.addEventListener("mouseup",()=>dragging=false);
+window.addEventListener("wheel",e=>{
+  targetDist+=.25*e.deltaY;
+  targetDist=Math.max(80,Math.min(600,targetDist));
+},{passive:true});
+
+// ---- ANIMACIÓN ----
+let t=0;
+function tick(){
+  requestAnimationFrame(tick);
+  t+=.01;
+  ring1.rotation.z+=.002; ring2.rotation.z-=.0015;
+  glow.scale.set(500*(1+.03*Math.sin(.4*t)),500*(1+.03*Math.sin(.4*t)),1);
+  const pulse=1+.05*Math.sin(3*t);
+  core.scale.set(pulse,pulse,pulse);
+  textGroup.children.forEach(obj=>{
+    obj.material.opacity=.8+.2*Math.sin(2*t);
+    obj.userData.theta+=obj.userData.speed;
+    obj.position.x=obj.userData.radius*Math.sin(obj.userData.phi)*Math.cos(obj.userData.theta);
+    obj.position.z=obj.userData.radius*Math.sin(obj.userData.phi)*Math.sin(obj.userData.theta);
+  });
+  currentDist+=.06*(targetDist-currentDist);
+  const cx=Math.cos(rotX),sx=Math.sin(rotX),cy=Math.cos(rotY),sy=Math.sin(rotY);
+  camera.position.set(currentDist*sy*cx,currentDist*sx,currentDist*cy*cx);
+  camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+}
+tick();
+
+window.addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
